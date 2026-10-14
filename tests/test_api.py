@@ -357,6 +357,51 @@ async def test_discovery_and_status(
     assert await api.get_online([(CODE, "C")]) == {CODE: True}
 
 
+ONLINE_STATUS = f"{API_BASE}/api/appcontrol/cmds/xkqOnlineStatus"
+OFFLINE = "0000000000000002"
+
+
+async def test_online_some_offline(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """Code 209 names the offline controllers but still lists every flag."""
+    aioclient_mock.post(
+        ONLINE_STATUS,
+        json={
+            "code": "209",
+            "message": "此线控器设备【0002】连接网络失败，请保证设备在线。",
+            "data": [
+                {"xkqCode": OFFLINE, "online": False, "gjyCode": 200},
+                {"xkqCode": CODE, "online": True, "gjyCode": 200},
+            ],
+        },
+    )
+    api = _api(hass, auth=Session("tok", 200002))
+    assert await api.get_online([(OFFLINE, "C"), (CODE, "C")]) == {OFFLINE: False, CODE: True}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"code": "209", "message": "m"},
+        {"code": "209", "message": "m", "data": None},
+        {"code": "209", "message": "m", "data": []},
+        {"code": "209", "message": "m", "data": {"xkqCode": CODE, "online": True}},
+        {"code": "209", "message": "m", "data": [{"xkqCode": [], "online": True}]},
+        {"code": "209", "message": "m", "data": [{"xkqCode": CODE, "online": True}, "x"]},
+        {"code": "400", "message": "参数有误。", "data": {"description": "xkqCtrlList error!"}},
+    ],
+)
+async def test_online_unreadable_answer(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, body: dict
+) -> None:
+    """Any other code, or a 209 without a readable list, still fails."""
+    aioclient_mock.post(ONLINE_STATUS, json=body)
+    api = _api(hass, auth=Session("tok", 200002))
+    with pytest.raises(YorkApiError, match=f"code {body['code']}"):
+        await api.get_online([(CODE, "C")])
+
+
 # -------------------------------------------------------------------- control
 
 CTRL_URL = f"{API_BASE}/api/appcontrol/cmds/multiIuOuCtrl"

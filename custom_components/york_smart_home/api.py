@@ -569,12 +569,29 @@ class YorkApi:
         }
 
     async def get_online(self, devices: list[tuple[str, str]]) -> dict[str, bool]:
-        """Online flag per xkqCode. ``devices`` is a list of (xkqCode, deviceType)."""
-        data = await self._request(
+        """Online flag per xkqCode. ``devices`` is a list of (xkqCode, deviceType).
+
+        Code "209" ("此线控器设备【…】连接网络失败，请保证设备在线。") means
+        some of the controllers are offline; its data still lists every
+        controller with its flag, so it is read like "200". A "209" without
+        such a list fails like any other code.
+        """
+        path = "/api/appcontrol/cmds/xkqOnlineStatus"
+        body = await self._authed(
             "POST",
-            "/api/appcontrol/cmds/xkqOnlineStatus",
+            path,
             json={"xkqCtrlList": [{"xkqCode": c, "deviceType": t} for c, t in devices]},
+            envelope=True,
         )
+        data = body.get("data")
+        readable_209 = (
+            body["code"] == "209"
+            and isinstance(data, list)
+            and bool(data)
+            and all(isinstance(d, dict) and isinstance(d.get("xkqCode"), str) for d in data)
+        )
+        if body["code"] != "200" and not readable_209:
+            raise YorkApiError(f"{path}: code {body['code']} {body.get('message') or ''}".rstrip())
         return {
             d["xkqCode"]: is_on(d.get("online"))
             for d in data or []
